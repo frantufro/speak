@@ -6,6 +6,33 @@ This project follows the workflow described in [WORKFLOW.md](./WORKFLOW.md) — 
 
 Before starting any non-trivial work, read `WORKFLOW.md` to know which skill applies at which phase (discovery → spec → triage → implementation → maintenance).
 
+### Issue tracker: cubil
+
+This project uses [cubil](https://github.com/frantufro/cubil) as its issue tracker. Tasks are markdown files in `.cubil/{backlog,doing,done}/`; roadmaps live in `.cubil/roadmaps/`.
+
+Workflow skills (`to-prd`, `to-issues`, `triage`) publish via the `cubil` CLI:
+
+- `cubil new "<title>" -m "<body>"` — create a task in `backlog/`, prints slug
+- `cubil list` / `cubil show <slug>` — inspect
+- `cubil start <slug>` / `cubil finish <slug>` — execution state (`backlog → doing → done`)
+- `cubil mv <slug> <status>` — non-linear moves
+- `cubil roadmap new "<title>" -m "..."` / `cubil roadmap add <roadmap> <task>` — group tasks
+
+**Triage state mapping** (Matt's vocabulary → cubil): cubil's status folders track *execution* state, not triage state. Store triage role in YAML frontmatter on each task:
+
+```yaml
+---
+category: bug | enhancement
+state: needs-triage | needs-info | ready-for-agent | ready-for-human | wontfix
+---
+```
+
+Newly created tasks default to `state: needs-triage` and live in `.cubil/backlog/`. `wontfix` tasks move to `.cubil/done/`.
+
+**Existing roadmaps**:
+- `v1` — the core **Capture → Transcription → Injection** loop per ADR 0004. Contains the PRD and five tracer-bullet slices.
+- `v2` — Whispr-Flow-style features deferred from v1 per ADR 0004.
+
 ---
 
 ## Behavioral guidelines
