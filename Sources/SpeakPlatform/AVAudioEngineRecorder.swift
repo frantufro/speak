@@ -33,6 +33,7 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
 
         let input = engine.inputNode
         let inputFormat = input.outputFormat(forBus: 0)
+        Diagnostics.log("audio input format: \(inputFormat)")
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16_000,
@@ -60,6 +61,7 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
             throw RecorderError.engineFailedToStart(underlying: error)
         }
         state.withLock { $0.isRunning = true }
+        Diagnostics.log("audio engine started")
     }
 
     public func stop() async -> SpeakKit.AudioBuffer {
@@ -113,11 +115,14 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
     }
 
     private func requestMicrophoneAccessIfNeeded() async throws {
-        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        Diagnostics.log("mic authorization status: \(status.rawValue)")
+        switch status {
         case .authorized:
             return
         case .notDetermined:
             let granted = await AVCaptureDevice.requestAccess(for: .audio)
+            Diagnostics.log("mic permission prompt result: \(granted)")
             if !granted { throw RecorderError.microphonePermissionDenied }
         case .denied, .restricted:
             throw RecorderError.microphonePermissionDenied

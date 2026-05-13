@@ -63,6 +63,7 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
 
     private func handle(type: CGEventType, event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            Diagnostics.log("event tap disabled (\(type)) — re-enabling")
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
@@ -70,12 +71,18 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
         let keycode = event.getIntegerValueField(.keyboardEventKeycode)
         guard keycode == Self.rightOptionKeycode else { return }
 
-        let nowHeld = (event.flags.rawValue & Self.rightOptionDeviceMask) != 0
+        let flagsRaw = event.flags.rawValue
+        let nowHeld = (flagsRaw & Self.rightOptionDeviceMask) != 0
 
         lock.lock()
         let previouslyHeld = isHeld
         isHeld = nowHeld
         lock.unlock()
+
+        Diagnostics.log(String(format: "rOpt flagsChanged keycode=%lld flags=0x%016llx nowHeld=%@ prev=%@",
+                               keycode, flagsRaw,
+                               nowHeld ? "true" : "false",
+                               previouslyHeld ? "true" : "false"))
 
         if nowHeld && !previouslyHeld {
             onPress?()

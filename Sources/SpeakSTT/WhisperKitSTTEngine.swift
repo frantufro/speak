@@ -17,10 +17,14 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, @unchecked Sendable 
 
     public func transcribe(_ audio: SpeakKit.AudioBuffer) async throws -> SpeakKit.Transcription {
         let engine = try await loadIfNeeded()
+        Diagnostics.log("whisperkit: transcribe(\(audio.frames.count) frames) starting")
+        let start = Date()
         let results = try await engine.transcribe(audioArray: audio.frames)
+        let elapsed = Date().timeIntervalSince(start)
         let text = results.map { $0.text }.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let detected = results.first?.language
+        Diagnostics.log("whisperkit: transcribe done in \(String(format: "%.2f", elapsed))s, \(text.count) chars, lang=\(detected ?? "?")")
         return SpeakKit.Transcription(text: text, sourceLanguage: language(for: detected))
     }
 
@@ -28,8 +32,11 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, @unchecked Sendable 
         if let existing = cached.withLock({ $0 }) {
             return existing
         }
+        Diagnostics.log("whisperkit: loading model \"\(modelName)\" (first use can take 30s–2min)")
+        let start = Date()
         let config = WhisperKitConfig(model: modelName, verbose: false, prewarm: false)
         let engine = try await WhisperKit(config)
+        Diagnostics.log("whisperkit: model loaded in \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
         cached.withLock { $0 = engine }
         return engine
     }
