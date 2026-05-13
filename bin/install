@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Build a release .app bundle for speak and copy it to /Applications.
+# Usage: bin/install [--dest <dir>]
+
+set -euo pipefail
+
+DEST="/Applications"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dest)
+            DEST="$2"
+            shift 2
+            ;;
+        -h|--help)
+            cat <<EOF
+Usage: bin/install [--dest <dir>]
+
+Builds a release binary, assembles speak.app, and copies it to <dir>
+(default: /Applications). Re-installing replaces the existing bundle.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "speak: unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+echo "▶ Building SpeakApp (release)…"
+swift build -c release --product SpeakApp
+
+BIN_PATH="$(swift build -c release --product SpeakApp --show-bin-path)/SpeakApp"
+if [[ ! -x "$BIN_PATH" ]]; then
+    echo "speak: built executable not found at $BIN_PATH" >&2
+    exit 1
+fi
+
+STAGE="$(mktemp -d)"
+trap 'rm -rf "$STAGE"' EXIT
+
+APP="$STAGE/speak.app"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+cp "$BIN_PATH" "$APP/Contents/MacOS/speak"
+chmod +x "$APP/Contents/MacOS/speak"
+
+cat > "$APP/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>club.hiddenpeople.speak</string>
+    <key>CFBundleName</key>
+    <string>speak</string>
+    <key>CFBundleDisplayName</key>
+    <string>speak</string>
+    <key>CFBundleExecutable</key>
+    <string>speak</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>speak records your voice locally so it can transcribe and paste what you said.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>speak synthesizes ⌘V to paste transcribed text into the focused app.</string>
+</dict>
+</plist>
+PLIST
+
+DEST_APP="$DEST/speak.app"
+if [[ -d "$DEST_APP" ]]; then
+    echo "▶ Replacing existing $DEST_APP"
+    rm -rf "$DEST_APP"
+fi
+mkdir -p "$DEST"
+cp -R "$APP" "$DEST_APP"
+
+echo "✓ Installed to $DEST_APP"
+echo
+echo "Next steps:"
+echo "  1. Open System Settings → Privacy & Security → Accessibility, add $DEST_APP"
+echo "  2. Open System Settings → Privacy & Security → Microphone, allow $DEST_APP"
+echo "  3. Launch with: open '$DEST_APP'"
