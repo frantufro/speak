@@ -4,27 +4,50 @@ import CoreGraphics
 import IOKit.hid
 import SpeakKit
 
-/// Watches `.flagsChanged` events for the right-Option key.
+/// Watches `.flagsChanged` events for a configurable hotkey combo.
 ///
-/// Keycode 61 is the right-Option key. We disambiguate left vs. right Option using the
-/// device-dependent flag bit `NX_DEVICERALTKEYMASK` (0x00000040) because the generic
-/// `.maskAlternate` bit is set for either Option key.
+/// The default combo is right-Option (keycode 61, `NX_DEVICERALTKEYMASK` = 0x00000040).
+/// Call `rebind(_:)` at any time to switch to a different combo; the event tap is torn down
+/// and re-installed so the new combo takes effect immediately.
 public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked Sendable {
-    private static let rightOptionKeycode: Int64 = 61
-    private static let rightOptionDeviceMask: UInt64 = 0x0000_0040 // NX_DEVICERALTKEYMASK
-
     public var onPress: (@Sendable () -> Void)?
     public var onRelease: (@Sendable () -> Void)?
 
+    private var combo: HotkeyCombo
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var isHeld = false
     private let lock = NSLock()
 
-    public init() {}
+    public init(combo: HotkeyCombo = .rightOption) {
+        self.combo = combo
+    }
 
     public func start() {
         guard tap == nil else { return }
+        installTap()
+    }
+
+    public func stop() {
+        tearDownTap()
+    }
+
+    public func rebind(_ newCombo: HotkeyCombo) {
+        lock.lock()
+        let wasRunning = tap != nil
+        combo = newCombo
+        isHeld = false          // reset held state so we don't fire a phantom release
+        lock.unlock()
+
+        if wasRunning {
+            tearDownTap()
+            installTap()
+        }
+    }
+
+    // MARK: – Private
+
+    private func installTap() {
         // kAXTrustedCheckOptionPrompt's documented string value.
         let options: NSDictionary = ["AXTrustedCheckOptionPrompt": true]
         let trusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
@@ -45,7 +68,7 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
         }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         let opaqueSelf = Unmanaged.passUnretained(self).toOpaque()
-        guard let tap = CGEvent.tapCreate(
+        guard let newTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .listenOnly,
@@ -63,14 +86,14 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
             )
             return
         }
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, newTap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        self.tap = tap
-        self.runLoopSource = source
+        CGEvent.tapEnable(tap: newTap, enable: true)
+        tap = newTap
+        runLoopSource = source
     }
 
-    public func stop() {
+    private func tearDownTap() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -91,16 +114,31 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
         let keycode = event.getIntegerValueField(.keyboardEventKeycode)
         let flagsRaw = event.flags.rawValue
         Diagnostics.log(String(format: "flagsChanged keycode=%lld flags=0x%016llx", keycode, flagsRaw))
-        guard keycode == Self.rightOptionKeycode else { return }
 
-        let nowHeld = (flagsRaw & Self.rightOptionDeviceMask) != 0
+        lock.lock()
+        let currentCombo = combo
+        lock.unlock()
+
+        guard keycode == currentCombo.keyCode else { return }
+
+        let nowHeld: Bool
+        if currentCombo.modifierFlags == 0 {
+            // Bare key: treat the keydown as the trigger event.
+            // flagsChanged with the key's bit in the flags = pressed.
+            // We can't distinguish pressed vs released for bare keys without device mask,
+            // so for bare-key combos we rely on the event having any non-zero flags going up
+            // and zero going down. This is good enough for single-modifier keys used alone.
+            nowHeld = flagsRaw != 0
+        } else {
+            nowHeld = (flagsRaw & currentCombo.modifierFlags) != 0
+        }
 
         lock.lock()
         let previouslyHeld = isHeld
         isHeld = nowHeld
         lock.unlock()
 
-        Diagnostics.log(String(format: "rOpt nowHeld=%@ prev=%@",
+        Diagnostics.log(String(format: "hotkey nowHeld=%@ prev=%@",
                                nowHeld ? "true" : "false",
                                previouslyHeld ? "true" : "false"))
 
