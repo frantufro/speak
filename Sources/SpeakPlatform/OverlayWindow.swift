@@ -39,6 +39,11 @@ final class OverlayWindow: NSWindow {
         sizeToFit()
     }
 
+    func updateDownloadProgress(percent: Int) {
+        pillView.updateDownloadProgress(percent: percent)
+        sizeToFit()
+    }
+
     private func sizeToFit() {
         let size = pillView.intrinsicContentSize
         setContentSize(size)
@@ -99,6 +104,14 @@ private final class OverlayPillView: NSView {
         default:
             break
         }
+        needsLayout = true
+    }
+
+    func updateDownloadProgress(percent: Int) {
+        layer?.backgroundColor = NSColor(white: 0.12, alpha: 0.82).cgColor
+        label.stringValue = "Downloading… \(percent)%"
+        dot.isHidden = true
+        spinner.isHidden = false
         needsLayout = true
     }
 

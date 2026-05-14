@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# Regenerates fixture WAV files for STTContractTests using the macOS `say` command.
+# The fixtures are already committed to the repo; run this only if you need to
+# regenerate them (e.g. after deleting or when updating expected phrases).
+#
+# Requires: macOS (for `say`), ffmpeg (brew install ffmpeg)
+#
+# Usage:
+#   bin/fetch-test-fixtures
+#
+# After running, execute the contract tests with:
+#   SPEAK_CONTRACT_TESTS=1 swift test --filter STTContractTests
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FIXTURES_DIR="$SCRIPT_DIR/../Tests/STTContractTests/Fixtures"
+mkdir -p "$FIXTURES_DIR"
+
+require_ffmpeg() {
+    if ! command -v ffmpeg &>/dev/null; then
+        echo "ERROR: ffmpeg is required. Install via: brew install ffmpeg"
+        exit 1
+    fi
+}
+
+require_ffmpeg
+
+echo "Generating STT contract test fixtures in $FIXTURES_DIR …"
+
+# --- English clip ---
+echo "  english.wav  — macOS voice Alex"
+say -v Alex -o /tmp/speak_fixture_en.aiff "The weather is nice today and the sun is shining"
+ffmpeg -y -i /tmp/speak_fixture_en.aiff -ar 16000 -ac 1 -f wav "$FIXTURES_DIR/english.wav" -loglevel error
+rm -f /tmp/speak_fixture_en.aiff
+
+# --- Spanish clip ---
+echo "  spanish.wav  — macOS voice Monica"
+say -v Monica -o /tmp/speak_fixture_es.aiff "El clima es muy bueno hoy en Buenos Aires"
+ffmpeg -y -i /tmp/speak_fixture_es.aiff -ar 16000 -ac 1 -f wav "$FIXTURES_DIR/spanish.wav" -loglevel error
+rm -f /tmp/speak_fixture_es.aiff
+
+# --- Silence (2 s) ---
+echo "  silence.wav  — 2 s of silence"
+ffmpeg -y -f lavfi -i "anullsrc=r=16000:cl=mono" -t 2 "$FIXTURES_DIR/silence.wav" -loglevel error
+
+# --- Short utterance (0.5 s of english) ---
+echo "  short.wav    — first 0.5 s of english.wav"
+ffmpeg -y -i "$FIXTURES_DIR/english.wav" -ss 0 -t 0.5 "$FIXTURES_DIR/short.wav" -loglevel error
+
+echo ""
+echo "Generated fixtures:"
+for f in "$FIXTURES_DIR"/*.wav; do
+    kb=$(du -k "$f" | cut -f1)
+    echo "  $(basename "$f")  (${kb} KB)"
+done
+echo ""
+echo "To run the contract tests:"
+echo "  SPEAK_CONTRACT_TESTS=1 swift test --filter STTContractTests"

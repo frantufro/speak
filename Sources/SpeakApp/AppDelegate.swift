@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionsService: PermissionsService?
     private var onboarding: OnboardingWindowController?
     private var permissionsRefreshTask: Task<Void, Never>?
+    private var stt: WhisperKitSTTEngine?
+    private var downloadWatchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = SettingsStore()
@@ -23,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hotkey = RightOptionHotkeyMonitor(combo: store.hotkey)
         let recorder = AVAudioEngineRecorder()
         let stt = WhisperKitSTTEngine(modelName: store.model)
+        self.stt = stt
         if !store.autoDetect {
             stt.setLanguage(store.language)
         }
@@ -44,6 +47,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.coordinator = coordinator
         self.hotkey = hotkey
+
+        // Show toast when hotkey is pressed during a download
+        Task {
+            await coordinator.setHotkeyDuringDownloadHandler {
+                Task { @MainActor in
+                    ToastPresenter.shared.show("speak is downloading the model. Try again in a moment.")
+                }
+            }
+        }
 
         let menuBar = MenuBarController(coordinator: coordinator)
         menuBar.install()
@@ -86,9 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Show onboarding if any permission is missing; otherwise start.
+        // Show onboarding if any permission is missing; otherwise start and auto-download.
         if permissions.current().allGranted {
             Task { await coordinator.start() }
+            startModelDownloadIfNeeded()
         } else {
             showOnboarding()
         }
@@ -98,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkey?.stop()
         overlay?.stop()
         permissionsRefreshTask?.cancel()
+        downloadWatchTask?.cancel()
     }
 
     // MARK: - Private
@@ -113,11 +127,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if service.current().allGranted {
                     Task { await self.coordinator?.start() }
                     self.menuBar?.setPermissionsNeeded(false)
+                    // Auto-download model on first run after onboarding completes.
+                    self.startModelDownloadIfNeeded()
                 }
             }
             onboarding = ctrl
         }
         onboarding?.show(startingAt: missing)
+    }
+
+    /// Kicks off a model download if the model isn't cached yet, and wires progress to the UI.
+    private func startModelDownloadIfNeeded() {
+        guard let stt, let coordinator, let menuBar, let overlay else { return }
+
+        // Register all stream subscribers BEFORE starting the download so no events are missed.
+        let menuBarStream = stt.downloadProgressStream()
+        let overlayStream = stt.downloadProgressStream()
+        let watchStream = stt.downloadProgressStream()
+
+        menuBar.observeDownloadProgress(menuBarStream)
+        overlay.observeDownloadProgress(overlayStream)
+
+        downloadWatchTask?.cancel()
+        downloadWatchTask = Task { [weak coordinator] in
+            for await event in watchStream {
+                switch event {
+                case .downloading:
+                    await coordinator?.setDownloading(true)
+                case .completed:
+                    await coordinator?.setDownloading(false)
+                    Diagnostics.log("appdelegate: model download complete")
+                case .failed(let msg):
+                    await coordinator?.setDownloading(false)
+                    Diagnostics.log("appdelegate: model download failed: \(msg)")
+                    await MainActor.run {
+                        ToastPresenter.shared.show("Model download failed. Will use previously cached model if available.")
+                    }
+                }
+            }
+        }
+
+        Task {
+            await stt.ensureModelDownloaded()
+        }
     }
 }
 

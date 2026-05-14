@@ -86,7 +86,10 @@ final class SettingsViewModel: ObservableObject {
 
     private func applyModel(_ modelName: String) {
         store.model = modelName
-        Diagnostics.log("settings: model set to \(modelName) — will be used on next capture")
+        Diagnostics.log("settings: model changed to \(modelName) — starting download if not cached")
+        Task {
+            await sttEngine.switchModel(modelName)
+        }
     }
 
     private func applyLaunchAtLogin(_ enabled: Bool) {

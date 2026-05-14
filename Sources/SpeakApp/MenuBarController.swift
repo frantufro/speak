@@ -7,6 +7,8 @@ final class MenuBarController {
     private var statusItem: NSStatusItem?
     private var pollTask: Task<Void, Never>?
     private var permissionsMenuItem: NSMenuItem?
+    private var downloadProgressTask: Task<Void, Never>?
+    private var currentDownloadPercent: Int? = nil
 
     var onPermissionsNeededTapped: (() -> Void)?
 
@@ -15,6 +17,27 @@ final class MenuBarController {
 
     init(coordinator: CaptureCoordinator) {
         self.coordinator = coordinator
+    }
+
+    /// Start observing download progress from the engine. Replaces any previous observer.
+    func observeDownloadProgress(_ stream: AsyncStream<SpeakKit.DownloadProgress>) {
+        downloadProgressTask?.cancel()
+        downloadProgressTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { break }
+                switch event {
+                case .downloading(let fraction):
+                    self.currentDownloadPercent = Int(fraction * 100)
+                    let t = "speak: downloading model… (\(self.currentDownloadPercent!)%)"
+                    self.statusItem?.button?.title = t
+                    if let stateItem = self.statusItem?.menu?.item(withTag: 1) {
+                        stateItem.title = t
+                    }
+                case .completed, .failed:
+                    self.currentDownloadPercent = nil
+                }
+            }
+        }
     }
 
     func install() {
@@ -80,7 +103,8 @@ final class MenuBarController {
         var last: CaptureCoordinator.State = .idle
         while !Task.isCancelled {
             let current = await coordinator.state
-            if current != last {
+            // Don't overwrite the menu bar while a download progress update is active.
+            if current != last, currentDownloadPercent == nil {
                 last = current
                 let t = title(for: current)
                 statusItem?.button?.title = t

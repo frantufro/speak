@@ -23,3 +23,15 @@ public protocol STTEngine: AnyObject, Sendable {
 public protocol PasteboardInjector: AnyObject, Sendable {
     func inject(_ text: String) async throws
 }
+
+/// An STT engine that can also report model-download progress.
+/// Conforms to `STTEngine` and adds a progress stream and a download trigger.
+public protocol DownloadableSTTEngine: STTEngine {
+    /// Returns an `AsyncStream` that emits `DownloadProgress` events while a
+    /// model is being downloaded. Completes immediately when no download is active.
+    func downloadProgressStream() -> AsyncStream<DownloadProgress>
+
+    /// Start downloading the model if it isn't cached yet.
+    /// No-ops if already cached or already downloading.
+    func ensureModelDownloaded() async
+}

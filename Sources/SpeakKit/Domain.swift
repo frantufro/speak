@@ -6,6 +6,16 @@ public struct AudioBuffer: Sendable, Equatable {
     public var isEmpty: Bool { frames.isEmpty }
 }
 
+/// Progress event emitted while a Whisper model is being downloaded.
+public enum DownloadProgress: Sendable, Equatable {
+    /// Download is in progress. `fraction` is in 0.0 … 1.0.
+    case downloading(fraction: Double)
+    /// Download completed successfully.
+    case completed
+    /// Download failed.
+    case failed(String)
+}
+
 public enum Language: Sendable, Equatable {
     case english
     case spanish
