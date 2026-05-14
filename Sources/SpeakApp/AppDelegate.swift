@@ -69,13 +69,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         permissions.statusDidChange = { [weak self] status in
             Task { @MainActor [weak self] in
                 self?.menuBar?.setPermissionsNeeded(!status.allGranted)
+                self?.onboarding?.permissionsStatusChanged(status)
+                if status.allGranted, let coordinator = self?.coordinator {
+                    Task { await coordinator.start() }
+                }
             }
         }
 
-        // Periodic refresh to catch runtime revocations (every 5 s)
+        // Periodic refresh to catch grants/revocations made via System Settings.
+        // 2 s while the wizard could be open feels responsive; 5 s would feel
+        // sluggish when the user is actively granting permissions.
         permissionsRefreshTask = Task { [weak permissions] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(2))
                 permissions?.refresh()
             }
         }
@@ -98,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showOnboarding() {
         let service = permissionsService!
+        service.refresh()
         let missing = service.current().firstMissing ?? .microphone
         if onboarding == nil {
             let ctrl = OnboardingWindowController(permissionsService: service)

@@ -30,7 +30,14 @@ public final class SystemPermissionsProvider: PermissionsProvider, @unchecked Se
             DispatchQueue.main.async { NSWorkspace.shared.open(url) }
             completion(accessibilityStatus())
         case .inputMonitoring:
+            // IOHIDRequestAccess often returns false without ever prompting
+            // for LSUIElement / agent apps. Fall back to opening the System
+            // Settings pane so the user can toggle the switch themselves.
             let granted = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+            if !granted {
+                let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
+                DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+            }
             completion(granted ? .granted : .denied)
         }
     }
