@@ -10,6 +10,8 @@ public final class OverlayPresenter {
     private let coordinator: CaptureCoordinator
     private let window = OverlayWindow()
     private var observeTask: Task<Void, Never>?
+    private var downloadTask: Task<Void, Never>?
+    private var isShowingDownload = false
 
     public init(coordinator: CaptureCoordinator) {
         self.coordinator = coordinator
@@ -23,6 +25,8 @@ public final class OverlayPresenter {
             // Hop to main actor for all window operations.
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Don't let capture-state commands hide the overlay during a download.
+                if self.isShowingDownload, case .hide = command { return }
                 self.apply(command)
             }
         }
@@ -37,9 +41,33 @@ public final class OverlayPresenter {
         }
     }
 
+    /// Start showing download progress in the overlay.
+    public func observeDownloadProgress(_ stream: AsyncStream<SpeakKit.DownloadProgress>) {
+        downloadTask?.cancel()
+        downloadTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { break }
+                switch event {
+                case .downloading(let fraction):
+                    self.isShowingDownload = true
+                    let percent = Int(fraction * 100)
+                    self.positionWindowNearCursor()
+                    self.window.updateDownloadProgress(percent: percent)
+                    self.window.orderFrontRegardless()
+                case .completed, .failed:
+                    self.isShowingDownload = false
+                    self.window.orderOut(nil)
+                }
+            }
+            self?.isShowingDownload = false
+        }
+    }
+
     public func stop() {
         observeTask?.cancel()
         observeTask = nil
+        downloadTask?.cancel()
+        downloadTask = nil
         window.orderOut(nil)
     }
 

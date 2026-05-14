@@ -16,6 +16,18 @@ public actor CaptureCoordinator {
     private let injector: PasteboardInjector
     private let maxCaptureDuration: Duration
 
+    /// Called (on the actor) when the user presses the hotkey while a model download
+    /// is in progress. The coordinator will NOT start recording in this case.
+    private var onHotkeyPressedDuringDownload: (@Sendable () -> Void)?
+
+    /// When true, hotkey presses are blocked and trigger `onHotkeyPressedDuringDownload`.
+    public private(set) var isDownloading: Bool = false
+
+    /// Set the callback to invoke when the hotkey is pressed during a download.
+    public func setHotkeyDuringDownloadHandler(_ handler: @escaping @Sendable () -> Void) {
+        onHotkeyPressedDuringDownload = handler
+    }
+
     private var stateWaiters: [(State, CheckedContinuation<Void, Never>)] = []
     private var capTimerTask: Task<Void, Never>?
     private var streamContinuations: [UUID: AsyncStream<State>.Continuation] = [:]
@@ -93,8 +105,18 @@ public actor CaptureCoordinator {
         }
     }
 
+    /// Update the downloading flag. Call from AppDelegate/download observer on main actor.
+    public func setDownloading(_ downloading: Bool) {
+        isDownloading = downloading
+        Diagnostics.log("coordinator: isDownloading=\(downloading)")
+    }
+
     private func handlePress() async {
-        Diagnostics.log("hotkey press (state=\(state))")
+        Diagnostics.log("hotkey press (state=\(state), isDownloading=\(isDownloading))")
+        if isDownloading {
+            onHotkeyPressedDuringDownload?()
+            return
+        }
         guard state == .idle else { return }
         setState(.recording)
         let cap = maxCaptureDuration

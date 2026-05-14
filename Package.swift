@@ -40,5 +40,12 @@ let package = Package(
             dependencies: ["SpeakKit"],
             path: "Tests/SpeakKitTests"
         ),
+        // Opt-in contract tests — NOT part of the default `swift test` run.
+        // Run with: SPEAK_CONTRACT_TESTS=1 swift test --filter STTContractTests
+        .testTarget(
+            name: "STTContractTests",
+            dependencies: ["SpeakSTT", "SpeakKit"],
+            path: "Tests/STTContractTests"
+        ),
     ]
 )

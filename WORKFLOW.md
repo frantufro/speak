@@ -76,3 +76,32 @@ curl -L https://github.com/mattpocock/skills/archive/refs/heads/main.tar.gz \
 ```
 
 To refresh the existing skills from upstream, re-run the equivalent extraction for each skill folder.
+
+## STT Engine Contract Tests
+
+The `STTContractTests` target contains end-to-end tests that run `WhisperKitSTTEngine` against
+real fixture WAV files. They are **excluded from the default `swift test` run** to keep CI fast.
+
+### Running the contract tests
+
+```bash
+# 1. Fixture WAVs are committed to Tests/STTContractTests/Fixtures/.
+#    If they're missing (e.g. after a fresh clone with LFS not initialised),
+#    regenerate them (requires macOS + ffmpeg):
+bin/fetch-test-fixtures
+
+# 2. Run with the opt-in flag and a target filter:
+SPEAK_CONTRACT_TESTS=1 swift test --filter STTContractTests
+```
+
+The tests use the `openai_whisper-tiny` model (~75 MB). WhisperKit downloads it on first run
+and caches it locally. Subsequent runs use the cache and complete in under a minute.
+
+### What the tests assert
+
+| Test | Fixture | Assertion |
+|------|---------|-----------|
+| `test_englishClip_containsExpectedWords` | `english.wav` | Transcript contains "weather", "sun", or "today" |
+| `test_spanishClip_containsExpectedWordsAndDetectedLanguageIsSpanish` | `spanish.wav` | Transcript contains Spanish words; `sourceLanguage == .spanish` |
+| `test_silenceClip_producesEmptyOrNearEmptyTranscript` | `silence.wav` | Transcript is ≤ 10 characters |
+| `test_shortUtterance_producesNonEmptyTranscript` | `short.wav` | Transcript is non-empty |
