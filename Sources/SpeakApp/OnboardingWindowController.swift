@@ -8,6 +8,7 @@ final class OnboardingWindowController: NSWindowController {
     private let permissionsService: PermissionsService
     private var currentStep: PermissionKind
     private var contentView: OnboardingView!
+    private var didBecomeActiveObserver: NSObjectProtocol?
 
     var onDone: (() -> Void)?
 
@@ -33,15 +34,36 @@ final class OnboardingWindowController: NSWindowController {
         contentView.onGrant = { [weak self] in self?.handleGrant() }
         contentView.onSkip = { [weak self] in self?.advance() }
         updateView()
+
+        // When the user returns from System Settings, re-check the status so
+        // the wizard advances without requiring a menu-bar re-entry.
+        didBecomeActiveObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleAppDidBecomeActive() }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func show(startingAt step: PermissionKind? = nil) {
         if let step { currentStep = step }
+        permissionsService.refresh()
         updateView()
         showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Called by the AppDelegate when the periodic refresh notices a status
+    /// change. Auto-advances if the current step is now granted.
+    func permissionsStatusChanged(_ status: PermissionsStatus) {
+        guard window?.isVisible == true else { return }
+        if stateFor(currentStep, in: status) == .granted {
+            advance()
+        }
     }
 
     // MARK: - Private
@@ -68,8 +90,41 @@ final class OnboardingWindowController: NSWindowController {
     }
 
     private func handleGrant() {
-        permissionsService.request(currentStep) { [weak self] _ in
-            DispatchQueue.main.async { self?.advance() }
+        // If we've already got it (e.g. user toggled the permission while the
+        // wizard was open and the periodic refresh hasn't fired yet), skip
+        // straight to the next step.
+        permissionsService.refresh()
+        if stateFor(currentStep, in: permissionsService.current()) == .granted {
+            advance()
+            return
+        }
+
+        let step = currentStep
+        permissionsService.request(step) { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.permissionsService.refresh()
+                let fresh = self.permissionsService.current()
+                if self.stateFor(step, in: fresh) == .granted {
+                    self.advance()
+                } else {
+                    // Most likely a System Settings flow (accessibility /
+                    // input monitoring): the request returned before the user
+                    // toggled the switch. Keep the wizard up; `didBecomeActive`
+                    // will pick up the change when they come back.
+                    self.window?.makeKeyAndOrderFront(nil)
+                }
+            }
+        }
+    }
+
+    private func handleAppDidBecomeActive() {
+        permissionsService.refresh()
+        let status = permissionsService.current()
+        if stateFor(currentStep, in: status) == .granted {
+            advance()
+        } else if window?.isVisible == true {
+            window?.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -84,6 +139,7 @@ final class OnboardingWindowController: NSWindowController {
         }
         currentStep = steps[idx + 1]
         updateView()
+        window?.makeKeyAndOrderFront(nil)
     }
 }
 
