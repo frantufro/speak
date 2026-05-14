@@ -44,3 +44,13 @@ final class FakeSecureInputDetector: SecureInputDetector, @unchecked Sendable {
         lock.withLock { _isEnabled = value }
     }
 }
+
+final class SpyToastDelegate: SecureInputToastDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _callCount = 0
+    var callCount: Int { lock.withLock { _callCount } }
+
+    func secureInputDidBlockInjection() {
+        lock.withLock { _callCount += 1 }
+    }
+}

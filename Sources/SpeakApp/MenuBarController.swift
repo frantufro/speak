@@ -6,6 +6,9 @@ final class MenuBarController {
     private let coordinator: CaptureCoordinator
     private var statusItem: NSStatusItem?
     private var pollTask: Task<Void, Never>?
+    private var permissionsMenuItem: NSMenuItem?
+
+    var onPermissionsNeededTapped: (() -> Void)?
 
     /// Injected after construction so we avoid a circular dependency at init time.
     var settingsWindowController: SettingsWindowController?
@@ -27,6 +30,16 @@ final class MenuBarController {
         stateItem.tag = 1
         menu.addItem(stateItem)
 
+        let permissionsItem = NSMenuItem(
+            title: "Permissions needed",
+            action: #selector(permissionsNeededTapped),
+            keyEquivalent: ""
+        )
+        permissionsItem.target = self
+        permissionsItem.isHidden = true
+        menu.addItem(permissionsItem)
+        self.permissionsMenuItem = permissionsItem
+
         menu.addItem(.separator())
 
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
@@ -45,6 +58,14 @@ final class MenuBarController {
         pollTask = Task { [weak self] in
             await self?.pollState()
         }
+    }
+
+    func setPermissionsNeeded(_ needed: Bool) {
+        permissionsMenuItem?.isHidden = !needed
+    }
+
+    @objc private func permissionsNeededTapped() {
+        onPermissionsNeededTapped?()
     }
 
     @objc private func openSettings() {

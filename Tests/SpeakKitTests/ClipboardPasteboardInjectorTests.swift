@@ -85,4 +85,23 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
         XCTAssertEqual(pasteboard.snapshot(), [original],
                        "Secure input must leave the pasteboard untouched")
     }
+
+    func test_secureInputEnabled_callsToastDelegate() async throws {
+        let pasteboard = InMemoryPasteboard()
+        pasteboard.write([.text("original")])
+        let secureInput = FakeSecureInputDetector(enabled: true)
+        let injector = ClipboardPasteboardInjector(
+            pasteboard: pasteboard,
+            keystroke: SpyKeystrokeSynthesizer(),
+            secureInput: secureInput,
+            pasteDelay: .milliseconds(5)
+        )
+
+        let delegate = SpyToastDelegate()
+        injector.secureInputToastDelegate = delegate
+
+        try await injector.inject("hello")
+
+        XCTAssertEqual(delegate.callCount, 1, "Toast delegate must be notified once for a secure-input block")
+    }
 }
