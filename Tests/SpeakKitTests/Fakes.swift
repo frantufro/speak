@@ -4,9 +4,11 @@ import Foundation
 final class FakeHotkeyMonitor: HotkeyMonitor, @unchecked Sendable {
     var onPress: (@Sendable () -> Void)?
     var onRelease: (@Sendable () -> Void)?
+    private(set) var currentCombo: HotkeyCombo = .rightOption
 
     func start() {}
     func stop() {}
+    func rebind(_ newCombo: HotkeyCombo) { currentCombo = newCombo }
 
     func simulatePress() { onPress?() }
     func simulateRelease() { onRelease?() }
