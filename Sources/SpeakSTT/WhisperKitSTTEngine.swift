@@ -10,16 +10,31 @@ import os
 public final class WhisperKitSTTEngine: SpeakKit.STTEngine, @unchecked Sendable {
     private let modelName: String
     private let cached: OSAllocatedUnfairLock<WhisperKit?> = .init(initialState: nil)
+    /// When non-nil, overrides auto-detect; WhisperKit uses this as the source language.
+    /// Set to nil to re-enable auto-detection.
+    private let forcedLanguage: OSAllocatedUnfairLock<String?> = .init(initialState: nil)
 
     public init(modelName: String = "openai_whisper-large-v3-v20240930_turbo") {
         self.modelName = modelName
     }
 
+    /// Override the source language WhisperKit uses. Pass `nil` to re-enable auto-detect.
+    public func setLanguage(_ code: String?) {
+        forcedLanguage.withLock { $0 = code }
+    }
+
     public func transcribe(_ audio: SpeakKit.AudioBuffer) async throws -> SpeakKit.Transcription {
         let engine = try await loadIfNeeded()
-        Diagnostics.log("whisperkit: transcribe(\(audio.frames.count) frames) starting")
+        let forced = forcedLanguage.withLock { $0 }
+        Diagnostics.log("whisperkit: transcribe(\(audio.frames.count) frames) starting, forced lang=\(forced ?? "auto")")
         let start = Date()
-        let results = try await engine.transcribe(audioArray: audio.frames)
+        let results: [TranscriptionResult]
+        if let forced {
+            let options = DecodingOptions(language: forced)
+            results = try await engine.transcribe(audioArray: audio.frames, decodeOptions: options)
+        } else {
+            results = try await engine.transcribe(audioArray: audio.frames)
+        }
         let elapsed = Date().timeIntervalSince(start)
         let text = results.map { $0.text }.joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -7,6 +7,9 @@ final class MenuBarController {
     private var statusItem: NSStatusItem?
     private var pollTask: Task<Void, Never>?
 
+    /// Injected after construction so we avoid a circular dependency at init time.
+    var settingsWindowController: SettingsWindowController?
+
     init(coordinator: CaptureCoordinator) {
         self.coordinator = coordinator
     }
@@ -17,16 +20,35 @@ final class MenuBarController {
         item.button?.toolTip = "speak — hold Right-Option to dictate"
 
         let menu = NSMenu()
+
+        // State display item (non-interactive)
+        let stateItem = NSMenuItem(title: "Idle", action: nil, keyEquivalent: "")
+        stateItem.isEnabled = false
+        stateItem.tag = 1
+        menu.addItem(stateItem)
+
+        menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit speak", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
-        item.menu = menu
 
+        item.menu = menu
         statusItem = item
 
         pollTask = Task { [weak self] in
             await self?.pollState()
         }
+    }
+
+    @objc private func openSettings() {
+        settingsWindowController?.showSettings()
     }
 
     @objc private func quit() {
@@ -39,7 +61,11 @@ final class MenuBarController {
             let current = await coordinator.state
             if current != last {
                 last = current
-                statusItem?.button?.title = title(for: current)
+                let t = title(for: current)
+                statusItem?.button?.title = t
+                if let stateItem = statusItem?.menu?.item(withTag: 1) {
+                    stateItem.title = current == .idle ? "Idle" : t
+                }
             }
             try? await Task.sleep(for: .milliseconds(120))
         }
