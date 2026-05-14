@@ -34,11 +34,35 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, @unchecked Sendable 
         }
         Diagnostics.log("whisperkit: loading model \"\(modelName)\" (first use can take 30s–2min)")
         let start = Date()
-        let config = WhisperKitConfig(model: modelName, verbose: false, prewarm: false)
+        let localFolder = Self.localModelFolder(for: modelName)
+        let config: WhisperKitConfig
+        if let localFolder {
+            Diagnostics.log("whisperkit: using local model folder \(localFolder.path)")
+            config = WhisperKitConfig(model: modelName, modelFolder: localFolder.path, verbose: false, prewarm: false, download: false)
+        } else {
+            config = WhisperKitConfig(model: modelName, verbose: false, prewarm: false)
+        }
         let engine = try await WhisperKit(config)
         Diagnostics.log("whisperkit: model loaded in \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
         cached.withLock { $0 = engine }
         return engine
+    }
+
+    /// Returns the on-disk model folder if WhisperKit's default HF cache already contains the required files.
+    /// This lets us bypass the HubApi download path entirely when the model is already present.
+    private static func localModelFolder(for modelName: String) -> URL? {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        guard let documents else { return nil }
+        let folder = documents
+            .appending(path: "huggingface/models/argmaxinc/whisperkit-coreml")
+            .appending(path: modelName)
+        let required = ["AudioEncoder.mlmodelc", "TextDecoder.mlmodelc", "MelSpectrogram.mlmodelc"]
+        for name in required {
+            if !FileManager.default.fileExists(atPath: folder.appending(path: name).path) {
+                return nil
+            }
+        }
+        return folder
     }
 
     private func language(for code: String?) -> SpeakKit.Language {

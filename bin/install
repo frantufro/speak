@@ -54,7 +54,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>club.hiddenpeople.speak</string>
+    <string>com.frantufro.speak</string>
     <key>CFBundleName</key>
     <string>speak</string>
     <key>CFBundleDisplayName</key>
@@ -75,6 +75,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>speak records your voice locally so it can transcribe and paste what you said.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>speak synthesizes ⌘V to paste transcribed text into the focused app.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>speak listens for the right-Option key as a global push-to-talk hotkey.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>speak needs Accessibility to install a system-wide hotkey for push-to-talk.</string>
 </dict>
 </plist>
 PLIST
@@ -86,6 +90,31 @@ if [[ -d "$DEST_APP" ]]; then
 fi
 mkdir -p "$DEST"
 cp -R "$APP" "$DEST_APP"
+
+# Sign with a stable identity so the Designated Requirement is anchored to
+# the cert (not a per-build CDHash). Without this, every rebuild invalidates
+# TCC grants for Accessibility and Input Monitoring because the csreq stored
+# in TCC.db references the previous build's CDHash.
+#
+# Picks the first available Apple Development / Mac Developer / self-signed
+# code-signing identity from the user's keychain. Falls back to ad-hoc if
+# none is present (TCC permissions will need re-granting on every rebuild).
+SIGNING_IDENTITY="$(security find-identity -p codesigning -v 2>/dev/null \
+    | grep -E '"(Apple Development|Mac Developer|Developer ID Application|speak-dev)' \
+    | head -n 1 \
+    | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ "(.*)"$/\1/')"
+
+if [[ -z "$SIGNING_IDENTITY" ]]; then
+    echo "⚠ No stable code-signing identity found; falling back to ad-hoc."
+    echo "  Run bin/setup-codesign to create a local one — TCC grants will then persist."
+    SIGN_ARG=("-")
+else
+    echo "▶ Signing with identity: $SIGNING_IDENTITY"
+    SIGN_ARG=("$SIGNING_IDENTITY")
+fi
+
+codesign --force --sign "${SIGN_ARG[@]}" --identifier com.frantufro.speak "$DEST_APP/Contents/MacOS/speak"
+codesign --force --sign "${SIGN_ARG[@]}" --identifier com.frantufro.speak "$DEST_APP"
 
 echo "✓ Installed to $DEST_APP"
 echo

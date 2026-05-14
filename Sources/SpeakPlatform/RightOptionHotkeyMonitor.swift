@@ -1,5 +1,7 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
+import IOKit.hid
 import SpeakKit
 
 /// Watches `.flagsChanged` events for the right-Option key.
@@ -23,6 +25,24 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
 
     public func start() {
         guard tap == nil else { return }
+        // kAXTrustedCheckOptionPrompt's documented string value.
+        let options: NSDictionary = ["AXTrustedCheckOptionPrompt": true]
+        let trusted = AXIsProcessTrustedWithOptions(options as CFDictionary)
+        Diagnostics.log("AX trusted (event-tap permission): \(trusted)")
+        if !trusted {
+            Diagnostics.log("→ macOS Accessibility approval prompt should now be visible.")
+            Diagnostics.log("→ click \"Open System Settings\", toggle speak on, then quit and relaunch speak.")
+        }
+        let listenAccess = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+        Diagnostics.log("Input Monitoring access: \(listenAccess.rawValue) (0=granted, 1=denied, 2=unknown)")
+        if listenAccess != kIOHIDAccessTypeGranted {
+            Diagnostics.log("→ requesting Input Monitoring permission (a dialog should appear)")
+            let granted = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+            Diagnostics.log("Input Monitoring prompt result: granted=\(granted)")
+            if !granted {
+                Diagnostics.log("→ open System Settings → Privacy & Security → Input Monitoring, toggle speak on, then quit and relaunch.")
+            }
+        }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         let opaqueSelf = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -69,9 +89,10 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
         }
         guard type == .flagsChanged else { return }
         let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+        let flagsRaw = event.flags.rawValue
+        Diagnostics.log(String(format: "flagsChanged keycode=%lld flags=0x%016llx", keycode, flagsRaw))
         guard keycode == Self.rightOptionKeycode else { return }
 
-        let flagsRaw = event.flags.rawValue
         let nowHeld = (flagsRaw & Self.rightOptionDeviceMask) != 0
 
         lock.lock()
@@ -79,8 +100,7 @@ public final class RightOptionHotkeyMonitor: SpeakKit.HotkeyMonitor, @unchecked 
         isHeld = nowHeld
         lock.unlock()
 
-        Diagnostics.log(String(format: "rOpt flagsChanged keycode=%lld flags=0x%016llx nowHeld=%@ prev=%@",
-                               keycode, flagsRaw,
+        Diagnostics.log(String(format: "rOpt nowHeld=%@ prev=%@",
                                nowHeld ? "true" : "false",
                                previouslyHeld ? "true" : "false"))
 

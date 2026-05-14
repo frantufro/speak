@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Create a self-signed code-signing identity in the user's login keychain.
+# Run once. After this, bin/install can sign with --sign speak-dev so the
+# Designated Requirement is anchored to this cert instead of a per-build CDHash.
+# That makes TCC grants (Accessibility, Input Monitoring) survive rebuilds.
+
+set -euo pipefail
+
+NAME="speak-dev"
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+# Bail if an identity with this name is already trusted for codesigning.
+if security find-identity -p codesigning -v 2>/dev/null | grep -q "\"$NAME\""; then
+    echo "✓ Code-signing identity \"$NAME\" already exists in $KEYCHAIN"
+    exit 0
+fi
+
+echo "▶ Generating self-signed code-signing certificate \"$NAME\"…"
+openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+    -keyout "$WORKDIR/key.pem" \
+    -out "$WORKDIR/cert.pem" \
+    -subj "/CN=$NAME" \
+    -addext "basicConstraints=critical,CA:false" \
+    -addext "keyUsage=critical,digitalSignature" \
+    -addext "extendedKeyUsage=critical,codeSigning" \
+    >/dev/null 2>&1
+
+openssl pkcs12 -export \
+    -inkey "$WORKDIR/key.pem" \
+    -in "$WORKDIR/cert.pem" \
+    -out "$WORKDIR/bundle.p12" \
+    -name "$NAME" \
+    -passout pass:tmp \
+    >/dev/null 2>&1
+
+echo "▶ Importing into $KEYCHAIN…"
+security import "$WORKDIR/bundle.p12" \
+    -k "$KEYCHAIN" \
+    -P tmp \
+    -T /usr/bin/codesign \
+    -A
+
+echo "▶ Marking certificate as trusted for code signing…"
+security add-trusted-cert \
+    -k "$KEYCHAIN" \
+    -p codeSign \
+    "$WORKDIR/cert.pem"
+
+echo
+echo "✓ Identity \"$NAME\" installed. Verify with:"
+echo "  security find-identity -p codesigning -v"

@@ -69,7 +69,11 @@ public actor CaptureCoordinator {
         setState(.recording)
         let cap = maxCaptureDuration
         capTimerTask = Task { [weak self] in
+            // `try? await Task.sleep` swallows CancellationError, so we must
+            // check `Task.isCancelled` explicitly — otherwise a release that
+            // races with sleep cancellation would still fire the cap handler.
             try? await Task.sleep(for: cap)
+            if Task.isCancelled { return }
             await self?.forceReleaseFromCap()
         }
         do {
