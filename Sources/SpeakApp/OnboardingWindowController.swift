@@ -1,0 +1,199 @@
+import AppKit
+import SpeakKit
+
+/// Walks the user through granting the three permissions speak needs.
+/// Present modally by calling `show(startingAt:)`.
+@MainActor
+final class OnboardingWindowController: NSWindowController {
+    private let permissionsService: PermissionsService
+    private var currentStep: PermissionKind
+    private var contentView: OnboardingView!
+
+    var onDone: (() -> Void)?
+
+    init(permissionsService: PermissionsService, startingAt step: PermissionKind = .microphone) {
+        self.permissionsService = permissionsService
+        self.currentStep = step
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 260),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "speak — permissions"
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        super.init(window: window)
+
+        contentView = OnboardingView(frame: window.contentView!.bounds)
+        contentView.autoresizingMask = [.width, .height]
+        window.contentView = contentView
+        contentView.onGrant = { [weak self] in self?.handleGrant() }
+        contentView.onSkip = { [weak self] in self?.advance() }
+        updateView()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    func show(startingAt step: PermissionKind? = nil) {
+        if let step { currentStep = step }
+        updateView()
+        showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // MARK: - Private
+
+    private static let steps: [PermissionKind] = [.microphone, .accessibility, .inputMonitoring]
+
+    private func updateView() {
+        let status = permissionsService.current()
+        let stepIndex = Self.steps.firstIndex(of: currentStep) ?? 0
+        contentView.update(
+            stepIndex: stepIndex,
+            totalSteps: Self.steps.count,
+            kind: currentStep,
+            alreadyGranted: stateFor(currentStep, in: status) == .granted
+        )
+    }
+
+    private func stateFor(_ kind: PermissionKind, in status: PermissionsStatus) -> PermissionState {
+        switch kind {
+        case .microphone: return status.microphone
+        case .accessibility: return status.accessibility
+        case .inputMonitoring: return status.inputMonitoring
+        }
+    }
+
+    private func handleGrant() {
+        permissionsService.request(currentStep) { [weak self] _ in
+            DispatchQueue.main.async { self?.advance() }
+        }
+    }
+
+    private func advance() {
+        permissionsService.refresh()
+        let steps = Self.steps
+        guard let idx = steps.firstIndex(of: currentStep), idx + 1 < steps.count else {
+            // All steps done
+            close()
+            onDone?()
+            return
+        }
+        currentStep = steps[idx + 1]
+        updateView()
+    }
+}
+
+// MARK: - View
+
+private final class OnboardingView: NSView {
+    var onGrant: (() -> Void)?
+    var onSkip: (() -> Void)?
+
+    private let stepLabel = NSTextField(labelWithString: "")
+    private let titleLabel = NSTextField(labelWithString: "")
+    private let bodyLabel = NSTextField(wrappingLabelWithString: "")
+    private let grantButton = NSButton(title: "Grant access", target: nil, action: nil)
+    private let skipButton = NSButton(title: "Skip for now", target: nil, action: nil)
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setupSubviews()
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    private func setupSubviews() {
+        stepLabel.font = .systemFont(ofSize: 11)
+        stepLabel.textColor = .secondaryLabelColor
+
+        titleLabel.font = .boldSystemFont(ofSize: 16)
+
+        bodyLabel.font = .systemFont(ofSize: 13)
+        bodyLabel.textColor = .secondaryLabelColor
+
+        grantButton.bezelStyle = .rounded
+        grantButton.keyEquivalent = "\r"
+        grantButton.target = self
+        grantButton.action = #selector(grantTapped)
+
+        skipButton.bezelStyle = .rounded
+        skipButton.target = self
+        skipButton.action = #selector(skipTapped)
+
+        for view in [stepLabel, titleLabel, bodyLabel, grantButton, skipButton] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            stepLabel.topAnchor.constraint(equalTo: topAnchor, constant: 24),
+            stepLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+
+            titleLabel.topAnchor.constraint(equalTo: stepLabel.bottomAnchor, constant: 6),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+
+            bodyLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 12),
+            bodyLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
+            bodyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+
+            skipButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
+            skipButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
+
+            grantButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
+            grantButton.trailingAnchor.constraint(equalTo: skipButton.leadingAnchor, constant: -8),
+        ])
+    }
+
+    func update(stepIndex: Int, totalSteps: Int, kind: PermissionKind, alreadyGranted: Bool) {
+        stepLabel.stringValue = "Step \(stepIndex + 1) of \(totalSteps)"
+        let (title, body) = copy(for: kind)
+        titleLabel.stringValue = title
+        bodyLabel.stringValue = body
+
+        if alreadyGranted {
+            grantButton.title = "Continue"
+            skipButton.isHidden = true
+        } else {
+            grantButton.title = actionTitle(for: kind)
+            skipButton.isHidden = false
+        }
+    }
+
+    @objc private func grantTapped() { onGrant?() }
+    @objc private func skipTapped() { onSkip?() }
+
+    // MARK: - Copy
+
+    private func copy(for kind: PermissionKind) -> (title: String, body: String) {
+        switch kind {
+        case .microphone:
+            return (
+                "Microphone",
+                "speak needs to hear you while you hold Right-Option. Audio is processed on your Mac — nothing leaves the device."
+            )
+        case .accessibility:
+            return (
+                "Accessibility",
+                "speak needs Accessibility access to watch for the Right-Option key so it can start and stop recording without appearing in every app."
+            )
+        case .inputMonitoring:
+            return (
+                "Input Monitoring",
+                "speak needs Input Monitoring so it can detect the Right-Option keypress system-wide, even when another app is in front."
+            )
+        }
+    }
+
+    private func actionTitle(for kind: PermissionKind) -> String {
+        switch kind {
+        case .microphone: return "Allow microphone"
+        case .accessibility: return "Open System Settings"
+        case .inputMonitoring: return "Allow input monitoring"
+        }
+    }
+}

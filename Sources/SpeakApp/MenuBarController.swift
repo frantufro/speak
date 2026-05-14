@@ -6,6 +6,9 @@ final class MenuBarController {
     private let coordinator: CaptureCoordinator
     private var statusItem: NSStatusItem?
     private var pollTask: Task<Void, Never>?
+    private var permissionsMenuItem: NSMenuItem?
+
+    var onPermissionsNeededTapped: (() -> Void)?
 
     init(coordinator: CaptureCoordinator) {
         self.coordinator = coordinator
@@ -17,6 +20,19 @@ final class MenuBarController {
         item.button?.toolTip = "speak — hold Right-Option to dictate"
 
         let menu = NSMenu()
+
+        let permissionsItem = NSMenuItem(
+            title: "Permissions needed",
+            action: #selector(permissionsNeededTapped),
+            keyEquivalent: ""
+        )
+        permissionsItem.target = self
+        permissionsItem.isHidden = true
+        menu.addItem(permissionsItem)
+        self.permissionsMenuItem = permissionsItem
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit speak", action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
@@ -27,6 +43,14 @@ final class MenuBarController {
         pollTask = Task { [weak self] in
             await self?.pollState()
         }
+    }
+
+    func setPermissionsNeeded(_ needed: Bool) {
+        permissionsMenuItem?.isHidden = !needed
+    }
+
+    @objc private func permissionsNeededTapped() {
+        onPermissionsNeededTapped?()
     }
 
     @objc private func quit() {

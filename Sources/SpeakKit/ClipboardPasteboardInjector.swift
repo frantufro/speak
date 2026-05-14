@@ -1,10 +1,11 @@
 import Foundation
 
-public final class ClipboardPasteboardInjector: PasteboardInjector {
+public final class ClipboardPasteboardInjector: PasteboardInjector, @unchecked Sendable {
     private let pasteboard: Pasteboard
     private let keystroke: KeystrokeSynthesizer
     private let secureInput: SecureInputDetector
     private let pasteDelay: Duration
+    public weak var secureInputToastDelegate: (any SecureInputToastDelegate)?
 
     public init(
         pasteboard: Pasteboard,
@@ -21,9 +22,11 @@ public final class ClipboardPasteboardInjector: PasteboardInjector {
     public func inject(_ text: String) async throws {
         guard !text.isEmpty else { return }
         guard !secureInput.isSecureInputEnabled else {
-            FileHandle.standardError.write(
-                Data("speak: refusing Injection — secure input is enabled\n".utf8)
-            )
+            if let delegate = secureInputToastDelegate {
+                delegate.secureInputDidBlockInjection()
+            } else {
+                Diagnostics.log("refusing injection — secure input is enabled")
+            }
             return
         }
         let saved = pasteboard.snapshot()

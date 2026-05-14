@@ -19,6 +19,13 @@ public protocol SecureInputDetector: AnyObject, Sendable {
     var isSecureInputEnabled: Bool { get }
 }
 
+/// Receives a notification when injection is blocked by secure input.
+/// The injector calls this instead of writing to stderr so the app layer
+/// can surface the message however it likes (e.g. a toast).
+public protocol SecureInputToastDelegate: AnyObject, Sendable {
+    func secureInputDidBlockInjection()
+}
+
 public extension PasteboardItem {
     static let utf8TextType = "public.utf8-plain-text"
 
