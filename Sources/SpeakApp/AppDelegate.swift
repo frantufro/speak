@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: RightOptionHotkeyMonitor?
     private var menuBar: MenuBarController?
     private var settings: SettingsWindowController?
+    private var overlay: OverlayPresenter?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = SettingsStore()
@@ -47,10 +48,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settings = settingsWC
         menuBar.settingsWindowController = settingsWC
 
+        let overlay = OverlayPresenter(coordinator: coordinator)
+        overlay.start()
+        self.overlay = overlay
+
         Task { await coordinator.start() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkey?.stop()
+        overlay?.stop()
     }
 }

@@ -18,6 +18,33 @@ public actor CaptureCoordinator {
 
     private var stateWaiters: [(State, CheckedContinuation<Void, Never>)] = []
     private var capTimerTask: Task<Void, Never>?
+    private var streamContinuations: [UUID: AsyncStream<State>.Continuation] = [:]
+
+    /// Yields each state transition as it happens. The first element is the
+    /// *current* state so that a new observer can synchronise immediately.
+    public func stateStream() -> AsyncStream<State> {
+        let id = UUID()
+        let current = state
+        return AsyncStream<State> { [weak self] continuation in
+            continuation.yield(current)
+            Task { [weak self] in
+                await self?.addContinuation(continuation, id: id)
+            }
+            continuation.onTermination = { [weak self] _ in
+                Task { [weak self] in
+                    await self?.removeContinuation(id: id)
+                }
+            }
+        }
+    }
+
+    private func addContinuation(_ continuation: AsyncStream<State>.Continuation, id: UUID) {
+        streamContinuations[id] = continuation
+    }
+
+    private func removeContinuation(id: UUID) {
+        streamContinuations.removeValue(forKey: id)
+    }
 
     public init(
         hotkey: HotkeyMonitor,
@@ -55,6 +82,9 @@ public actor CaptureCoordinator {
         state = new
         if previous != new {
             Diagnostics.log("state \(previous) → \(new)")
+            for continuation in streamContinuations.values {
+                continuation.yield(new)
+            }
         }
         let (matching, remaining) = stateWaiters.partitioned { $0.0 == new }
         stateWaiters = remaining
