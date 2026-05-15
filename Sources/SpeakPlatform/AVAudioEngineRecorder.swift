@@ -4,7 +4,6 @@ import SpeakKit
 
 public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sendable {
     public enum RecorderError: Error {
-        case microphonePermissionDenied
         case converterUnavailable
         case engineFailedToStart(underlying: Error)
     }
@@ -22,8 +21,6 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
     public init() {}
 
     public func start() async throws {
-        try await requestMicrophoneAccessIfNeeded()
-
         let alreadyRunning = state.withLock { current -> Bool in
             if current.isRunning { return true }
             current.buffer.removeAll(keepingCapacity: true)
@@ -112,22 +109,5 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
         let frames = Array(UnsafeBufferPointer(start: channel, count: count))
 
         state.withLock { $0.buffer.append(contentsOf: frames) }
-    }
-
-    private func requestMicrophoneAccessIfNeeded() async throws {
-        let status = AVCaptureDevice.authorizationStatus(for: .audio)
-        Diagnostics.log("mic authorization status: \(status.rawValue)")
-        switch status {
-        case .authorized:
-            return
-        case .notDetermined:
-            let granted = await AVCaptureDevice.requestAccess(for: .audio)
-            Diagnostics.log("mic permission prompt result: \(granted)")
-            if !granted { throw RecorderError.microphonePermissionDenied }
-        case .denied, .restricted:
-            throw RecorderError.microphonePermissionDenied
-        @unknown default:
-            throw RecorderError.microphonePermissionDenied
-        }
     }
 }
