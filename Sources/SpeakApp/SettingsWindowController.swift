@@ -24,6 +24,7 @@ final class SettingsWindowController: NSWindowController {
 
         let view = SettingsView(vm: vm)
         let hosting = NSHostingController(rootView: view)
+        hosting.sizingOptions = [.preferredContentSize]
 
         let window = NSWindow(contentViewController: hosting)
         window.title = "speak Settings"
