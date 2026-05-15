@@ -3,10 +3,10 @@ import Carbon.HIToolbox
 import CoreGraphics
 import SpeakKit
 
-public final class CGEventKeystrokeSynthesizer: SpeakKit.KeystrokeSynthesizer, @unchecked Sendable {
+public final class MacInjectionAdapter: InjectionAdapter, @unchecked Sendable {
     public init() {}
 
-    public func sendCommandV() {
+    public func triggerPaste() {
         let source = CGEventSource(stateID: .combinedSessionState)
         let vKeyCode = CGKeyCode(kVK_ANSI_V)
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
@@ -18,10 +18,6 @@ public final class CGEventKeystrokeSynthesizer: SpeakKit.KeystrokeSynthesizer, @
         down.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
     }
-}
-
-public final class MacSecureInputDetector: SpeakKit.SecureInputDetector, @unchecked Sendable {
-    public init() {}
 
     public var isSecureInputEnabled: Bool {
         IsSecureEventInputEnabled()

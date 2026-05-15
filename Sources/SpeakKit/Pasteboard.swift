@@ -11,11 +11,8 @@ public protocol Pasteboard: AnyObject, Sendable {
     func writeString(_ text: String)
 }
 
-public protocol KeystrokeSynthesizer: AnyObject, Sendable {
-    func sendCommandV()
-}
-
-public protocol SecureInputDetector: AnyObject, Sendable {
+public protocol InjectionAdapter: AnyObject, Sendable {
+    func triggerPaste()
     var isSecureInputEnabled: Bool { get }
 }
 

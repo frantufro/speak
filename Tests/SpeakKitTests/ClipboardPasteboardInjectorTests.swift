@@ -5,19 +5,17 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
     func test_injectText_writesThenRestoresPreviousString() async throws {
         let pasteboard = InMemoryPasteboard()
         pasteboard.writeString("original-clipboard")
-        let keystroke = SpyKeystrokeSynthesizer()
-        let secureInput = FakeSecureInputDetector(enabled: false)
+        let adapter = FakeInjectionAdapter(secureInputEnabled: false)
 
         let injector = ClipboardPasteboardInjector(
             pasteboard: pasteboard,
-            keystroke: keystroke,
-            secureInput: secureInput,
+            adapter: adapter,
             pasteDelay: .milliseconds(5)
         )
 
         try await injector.inject("hello")
 
-        XCTAssertEqual(keystroke.sendCount, 1, "⌘V must be synthesized exactly once")
+        XCTAssertEqual(adapter.pasteCount, 1, "⌘V must be synthesized exactly once")
         XCTAssertEqual(pasteboard.snapshot().first?.asString, "original-clipboard",
                        "Previous pasteboard string must be restored after the paste")
     }
@@ -33,8 +31,7 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
 
         let injector = ClipboardPasteboardInjector(
             pasteboard: pasteboard,
-            keystroke: SpyKeystrokeSynthesizer(),
-            secureInput: FakeSecureInputDetector(enabled: false),
+            adapter: FakeInjectionAdapter(secureInputEnabled: false),
             pasteDelay: .milliseconds(5)
         )
 
@@ -49,18 +46,17 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
         let pasteboard = InMemoryPasteboard()
         let original = PasteboardItem.text("untouched")
         pasteboard.write([original])
-        let keystroke = SpyKeystrokeSynthesizer()
+        let adapter = FakeInjectionAdapter(secureInputEnabled: false)
 
         let injector = ClipboardPasteboardInjector(
             pasteboard: pasteboard,
-            keystroke: keystroke,
-            secureInput: FakeSecureInputDetector(enabled: false),
+            adapter: adapter,
             pasteDelay: .milliseconds(5)
         )
 
         try await injector.inject("")
 
-        XCTAssertEqual(keystroke.sendCount, 0, "Empty injection must not synthesize ⌘V")
+        XCTAssertEqual(adapter.pasteCount, 0, "Empty injection must not synthesize ⌘V")
         XCTAssertEqual(pasteboard.snapshot(), [original],
                        "Empty injection must leave the pasteboard untouched")
     }
@@ -69,19 +65,17 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
         let pasteboard = InMemoryPasteboard()
         let original = PasteboardItem.text("untouched")
         pasteboard.write([original])
-        let keystroke = SpyKeystrokeSynthesizer()
-        let secureInput = FakeSecureInputDetector(enabled: true)
+        let adapter = FakeInjectionAdapter(secureInputEnabled: true)
 
         let injector = ClipboardPasteboardInjector(
             pasteboard: pasteboard,
-            keystroke: keystroke,
-            secureInput: secureInput,
+            adapter: adapter,
             pasteDelay: .milliseconds(5)
         )
 
         try await injector.inject("hello")
 
-        XCTAssertEqual(keystroke.sendCount, 0, "Secure input must short-circuit ⌘V synthesis")
+        XCTAssertEqual(adapter.pasteCount, 0, "Secure input must short-circuit ⌘V synthesis")
         XCTAssertEqual(pasteboard.snapshot(), [original],
                        "Secure input must leave the pasteboard untouched")
     }
@@ -89,11 +83,9 @@ final class ClipboardPasteboardInjectorTests: XCTestCase {
     func test_secureInputEnabled_callsToastDelegate() async throws {
         let pasteboard = InMemoryPasteboard()
         pasteboard.write([.text("original")])
-        let secureInput = FakeSecureInputDetector(enabled: true)
         let injector = ClipboardPasteboardInjector(
             pasteboard: pasteboard,
-            keystroke: SpyKeystrokeSynthesizer(),
-            secureInput: secureInput,
+            adapter: FakeInjectionAdapter(secureInputEnabled: true),
             pasteDelay: .milliseconds(5)
         )
 
