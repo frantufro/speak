@@ -32,8 +32,17 @@ public final class AVAudioEngineRecorder: SpeakKit.AudioRecorder, @unchecked Sen
         guard !alreadyRunning else { return }
 
         let input = engine.inputNode
+        // Enable Apple's voice processing pipeline (voice isolation, noise
+        // suppression, AEC). Must be set before the engine starts and before
+        // taps are installed. Re-querying inputFormat afterwards is required
+        // because enabling voice processing changes the node's output format.
+        do {
+            try input.setVoiceProcessingEnabled(true)
+        } catch {
+            Diagnostics.log("voice processing enable failed: \(error)")
+        }
         let inputFormat = input.outputFormat(forBus: 0)
-        Diagnostics.log("audio input format: \(inputFormat)")
+        Diagnostics.log("audio input format: \(inputFormat) voiceProcessing=\(input.isVoiceProcessingEnabled)")
         guard let target = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: 16_000,
