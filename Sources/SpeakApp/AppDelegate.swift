@@ -31,8 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let injector = ClipboardPasteboardInjector(
             pasteboard: NSPasteboardAdapter(),
-            keystroke: CGEventKeystrokeSynthesizer(),
-            secureInput: MacSecureInputDetector()
+            adapter: MacInjectionAdapter()
         )
 
         // Wire secure-input toast

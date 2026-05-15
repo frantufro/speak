@@ -18,30 +18,27 @@ final class InMemoryPasteboard: Pasteboard, @unchecked Sendable {
     }
 }
 
-final class SpyKeystrokeSynthesizer: KeystrokeSynthesizer, @unchecked Sendable {
+final class FakeInjectionAdapter: InjectionAdapter, @unchecked Sendable {
     private let lock = NSLock()
-    private var _sendCount = 0
-    var sendCount: Int { lock.withLock { _sendCount } }
+    private var _pasteCount = 0
+    private var _isSecureInputEnabled: Bool
 
-    func sendCommandV() {
-        lock.withLock { _sendCount += 1 }
+    init(secureInputEnabled: Bool = false) {
+        self._isSecureInputEnabled = secureInputEnabled
     }
-}
 
-final class FakeSecureInputDetector: SecureInputDetector, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _isEnabled: Bool
-
-    init(enabled: Bool = false) {
-        self._isEnabled = enabled
-    }
+    var pasteCount: Int { lock.withLock { _pasteCount } }
 
     var isSecureInputEnabled: Bool {
-        lock.withLock { _isEnabled }
+        lock.withLock { _isSecureInputEnabled }
     }
 
-    func setEnabled(_ value: Bool) {
-        lock.withLock { _isEnabled = value }
+    func triggerPaste() {
+        lock.withLock { _pasteCount += 1 }
+    }
+
+    func setSecureInputEnabled(_ value: Bool) {
+        lock.withLock { _isSecureInputEnabled = value }
     }
 }
 
