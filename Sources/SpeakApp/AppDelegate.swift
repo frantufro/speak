@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var permissionsService: PermissionsService?
     private var onboarding: OnboardingWindowController?
     private var permissionsRefreshTask: Task<Void, Never>?
-    private var stt: WhisperKitSTTEngine?
+    private var stt: (any DownloadableSTTEngine)?
     private var downloadWatchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

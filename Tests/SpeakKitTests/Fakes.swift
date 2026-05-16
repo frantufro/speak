@@ -52,6 +52,8 @@ final class HangingSTTEngine: STTEngine, @unchecked Sendable {
         return result
     }
 
+    func setLanguage(_ code: String?) {}
+
     func releaseTranscription() {
         continuation.yield()
     }
@@ -72,6 +74,8 @@ final class FakeSTTEngine: STTEngine, @unchecked Sendable {
         case .failure(let e): throw e
         }
     }
+
+    func setLanguage(_ code: String?) {}
 }
 
 actor SpyPasteboardInjector: PasteboardInjector {
