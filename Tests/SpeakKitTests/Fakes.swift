@@ -39,6 +39,8 @@ final class HangingSTTEngine: STTEngine, @unchecked Sendable {
     private let stream: AsyncStream<Void>
     private let continuation: AsyncStream<Void>.Continuation
 
+    var modelState: ModelState = .ready
+
     init(result: Transcription) {
         var cont: AsyncStream<Void>.Continuation!
         self.stream = AsyncStream { cont = $0 }
@@ -54,6 +56,14 @@ final class HangingSTTEngine: STTEngine, @unchecked Sendable {
 
     func setLanguage(_ code: String?) {}
 
+    func modelStateUpdates() -> AsyncStream<ModelState> {
+        let current = modelState
+        return AsyncStream { cont in
+            cont.yield(current)
+            cont.finish()
+        }
+    }
+
     func releaseTranscription() {
         continuation.yield()
     }
@@ -65,8 +75,16 @@ final class FakeSTTEngine: STTEngine, @unchecked Sendable {
         case failure(Error)
     }
     private let outcome: Outcome
-    init(result: Transcription) { self.outcome = .success(result) }
-    init(error: Error) { self.outcome = .failure(error) }
+    var modelState: ModelState
+
+    init(result: Transcription, modelState: ModelState = .ready) {
+        self.outcome = .success(result)
+        self.modelState = modelState
+    }
+    init(error: Error) {
+        self.outcome = .failure(error)
+        self.modelState = .ready
+    }
 
     func transcribe(_ audio: AudioBuffer) async throws -> Transcription {
         switch outcome {
@@ -76,6 +94,14 @@ final class FakeSTTEngine: STTEngine, @unchecked Sendable {
     }
 
     func setLanguage(_ code: String?) {}
+
+    func modelStateUpdates() -> AsyncStream<ModelState> {
+        let current = modelState
+        return AsyncStream { cont in
+            cont.yield(current)
+            cont.finish()
+        }
+    }
 }
 
 actor SpyPasteboardInjector: PasteboardInjector {

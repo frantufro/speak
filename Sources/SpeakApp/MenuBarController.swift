@@ -19,21 +19,21 @@ final class MenuBarController {
         self.coordinator = coordinator
     }
 
-    /// Start observing download progress from the engine. Replaces any previous observer.
-    func observeDownloadProgress(_ stream: AsyncStream<SpeakKit.DownloadProgress>) {
+    /// Start observing ModelState from the engine. Replaces any previous observer.
+    func observeModelState(_ stream: AsyncStream<SpeakKit.ModelState>) {
         downloadProgressTask?.cancel()
         downloadProgressTask = Task { [weak self] in
-            for await event in stream {
+            for await state in stream {
                 guard let self else { break }
-                switch event {
-                case .downloading(let fraction):
+                switch state {
+                case .notReady(.downloading(let fraction)):
                     self.currentDownloadPercent = Int(fraction * 100)
                     let t = "speak: downloading model… (\(self.currentDownloadPercent!)%)"
                     self.statusItem?.button?.title = t
                     if let stateItem = self.statusItem?.menu?.item(withTag: 1) {
                         stateItem.title = t
                     }
-                case .completed, .failed:
+                case .ready, .notReady(.checking), .notReady(.failed):
                     self.currentDownloadPercent = nil
                 }
             }

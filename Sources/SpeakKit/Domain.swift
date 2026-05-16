@@ -6,14 +6,21 @@ public struct AudioBuffer: Sendable, Equatable {
     public var isEmpty: Bool { frames.isEmpty }
 }
 
-/// Progress event emitted while a Whisper model is being downloaded.
-public enum DownloadProgress: Sendable, Equatable {
-    /// Download is in progress. `fraction` is in 0.0 … 1.0.
+/// Snapshot of whether an STT engine is ready to transcribe right now.
+public enum ModelState: Sendable, Equatable {
+    case ready
+    case notReady(NotReadyReason)
+
+    public var isReady: Bool {
+        if case .ready = self { return true } else { return false }
+    }
+}
+
+/// The reason an STT engine is not yet ready to transcribe.
+public enum NotReadyReason: Sendable, Equatable {
+    case checking
     case downloading(fraction: Double)
-    /// Download completed successfully.
-    case completed
-    /// Download failed.
-    case failed(String)
+    case failed(message: String)
 }
 
 public enum Language: Sendable, Equatable {

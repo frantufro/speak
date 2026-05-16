@@ -41,20 +41,20 @@ public final class OverlayPresenter {
         }
     }
 
-    /// Start showing download progress in the overlay.
-    public func observeDownloadProgress(_ stream: AsyncStream<SpeakKit.DownloadProgress>) {
+    /// Start observing ModelState from the engine for overlay display.
+    public func observeModelState(_ stream: AsyncStream<SpeakKit.ModelState>) {
         downloadTask?.cancel()
         downloadTask = Task { [weak self] in
-            for await event in stream {
+            for await state in stream {
                 guard let self else { break }
-                switch event {
-                case .downloading(let fraction):
+                switch state {
+                case .notReady(.downloading(let fraction)):
                     self.isShowingDownload = true
                     let percent = Int(fraction * 100)
                     self.positionWindowNearCursor()
                     self.window.updateDownloadProgress(percent: percent)
                     self.window.orderFrontRegardless()
-                case .completed, .failed:
+                case .ready, .notReady(.checking), .notReady(.failed):
                     self.isShowingDownload = false
                     self.window.orderOut(nil)
                 }
