@@ -15,11 +15,41 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
         stateLock.withLock { $0.modelName = modelName }
     }
 
-    // MARK: - Public API
+    // MARK: - STTEngine
 
     /// Override the source language WhisperKit uses. Pass `nil` to re-enable auto-detect.
     public func setLanguage(_ code: String?) {
         stateLock.withLock { $0.forcedLanguage = code }
+    }
+
+    public var modelState: SpeakKit.ModelState {
+        stateLock.withLock { $0.modelState }
+    }
+
+    /// Returns a stream that yields the current ModelState immediately, then each transition.
+    /// Multiple concurrent subscribers each get their own independent stream.
+    public func modelStateUpdates() -> AsyncStream<SpeakKit.ModelState> {
+        let (stream, cont) = AsyncStream<SpeakKit.ModelState>.makeStream()
+        stateLock.withLock { state in
+            cont.yield(state.modelState)
+            state.continuations.append(cont)
+        }
+        return stream
+    }
+
+    // MARK: - DownloadableSTTEngine
+
+    /// Begin downloading/loading the model if not already cached or downloading.
+    public func ensureModelDownloaded() async {
+        let shouldStart: Bool = stateLock.withLock { state in
+            guard state.cachedEngine == nil else { return false }
+            if case .notReady(.downloading) = state.modelState { return false }
+            if case .notReady(.checking) = state.modelState { return false }
+            state.setModelState(.notReady(.checking))
+            return true
+        }
+        guard shouldStart else { return }
+        await performLoad()
     }
 
     /// Switch to a different model. If `newModelName` differs and isn't cached,
@@ -29,45 +59,15 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
             guard newModelName != state.modelName else { return false }
             state.modelName = newModelName
             state.cachedEngine = nil
-            state.isDownloading = false
+            state.setModelState(.notReady(.checking))
             return true
         }
         guard needsSwitch else { return }
         Diagnostics.log("whisperkit: switched model to \(newModelName)")
-        await ensureModelDownloaded()
-    }
-
-    // MARK: - DownloadableSTTEngine
-
-    /// Returns a stream of download progress events for the *current or next* download.
-    /// The stream receives events if a download starts (or is already running).
-    /// The caller should call this before `ensureModelDownloaded()` to avoid missing events.
-    public func downloadProgressStream() -> AsyncStream<SpeakKit.DownloadProgress> {
-        let (stream, cont) = AsyncStream<SpeakKit.DownloadProgress>.makeStream()
-        stateLock.withLock { state in
-            if state.cachedEngine != nil {
-                // Model already loaded; no download will happen.
-                cont.finish()
-            } else {
-                // Register for upcoming (or current) download events.
-                state.continuations.append(cont)
-            }
-        }
-        return stream
-    }
-
-    /// Begin downloading/loading the model if not already cached or downloading.
-    public func ensureModelDownloaded() async {
-        let shouldStart: Bool = stateLock.withLock { state in
-            guard state.cachedEngine == nil, !state.isDownloading else { return false }
-            state.isDownloading = true
-            return true
-        }
-        guard shouldStart else { return }
         await performLoad()
     }
 
-    // MARK: - STTEngine
+    // MARK: - Transcription
 
     public func transcribe(_ audio: SpeakKit.AudioBuffer) async throws -> SpeakKit.Transcription {
         let engine = try await loadIfNeeded()
@@ -95,19 +95,23 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
         if let existing = stateLock.withLock({ $0.cachedEngine }) {
             return existing
         }
-        let alreadyDownloading = stateLock.withLock { state -> Bool in
-            if state.isDownloading { return true }
-            state.isDownloading = true
-            return false
+        let alreadyInProgress = stateLock.withLock { state -> Bool in
+            switch state.modelState {
+            case .notReady(.downloading), .notReady(.checking):
+                return true
+            default:
+                state.setModelState(.notReady(.checking))
+                return false
+            }
         }
-        if alreadyDownloading {
+        if alreadyInProgress {
             // Wait for the ongoing download by polling.
             while true {
                 try await Task.sleep(for: .milliseconds(200))
                 if let engine = stateLock.withLock({ $0.cachedEngine }) {
                     return engine
                 }
-                if !stateLock.withLock({ $0.isDownloading }) {
+                if case .notReady(.failed) = stateLock.withLock({ $0.modelState }) {
                     throw WhisperKitLoadError.downloadFailed
                 }
             }
@@ -133,27 +137,28 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
                 Diagnostics.log("whisperkit: model loaded in \(String(format: "%.2f", elapsed))s")
                 stateLock.withLock { state in
                     state.cachedEngine = engine
-                    state.isDownloading = false
-                    state.broadcast(.completed)
+                    state.setModelState(.ready)
                     state.finishAll()
                 }
             } catch {
                 Diagnostics.log("whisperkit: model load failed: \(error)")
                 stateLock.withLock { state in
-                    state.isDownloading = false
-                    state.broadcast(.failed(error.localizedDescription))
+                    state.setModelState(.notReady(.failed(message: error.localizedDescription)))
                     state.finishAll()
                 }
             }
         } else {
             // Download first
             Diagnostics.log("whisperkit: downloading model \(modelName)…")
+            stateLock.withLock { state in
+                state.setModelState(.notReady(.downloading(fraction: 0)))
+            }
             do {
                 _ = try await WhisperKit.download(variant: modelName) { [weak self] progress in
                     guard let self else { return }
                     let fraction = progress.fractionCompleted
                     self.stateLock.withLock { state in
-                        state.broadcast(.downloading(fraction: fraction))
+                        state.setModelState(.notReady(.downloading(fraction: fraction)))
                     }
                 }
                 // Load after download
@@ -168,15 +173,13 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
                 Diagnostics.log("whisperkit: model downloaded and loaded in \(String(format: "%.2f", elapsed))s")
                 stateLock.withLock { state in
                     state.cachedEngine = engine
-                    state.isDownloading = false
-                    state.broadcast(.completed)
+                    state.setModelState(.ready)
                     state.finishAll()
                 }
             } catch {
                 Diagnostics.log("whisperkit: download failed: \(error)")
                 stateLock.withLock { state in
-                    state.isDownloading = false
-                    state.broadcast(.failed(error.localizedDescription))
+                    state.setModelState(.notReady(.failed(message: error.localizedDescription)))
                     state.finishAll()
                 }
             }
@@ -220,12 +223,13 @@ private struct State {
     var modelName: String = "openai_whisper-large-v3-v20240930_turbo"
     var cachedEngine: WhisperKit? = nil
     var forcedLanguage: String? = nil
-    var isDownloading: Bool = false
-    var continuations: [AsyncStream<SpeakKit.DownloadProgress>.Continuation] = []
+    var modelState: SpeakKit.ModelState = .notReady(.checking)
+    var continuations: [AsyncStream<SpeakKit.ModelState>.Continuation] = []
 
-    mutating func broadcast(_ event: SpeakKit.DownloadProgress) {
+    mutating func setModelState(_ new: SpeakKit.ModelState) {
+        modelState = new
         for cont in continuations {
-            cont.yield(event)
+            cont.yield(new)
         }
     }
 

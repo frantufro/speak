@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboarding: OnboardingWindowController?
     private var permissionsRefreshTask: Task<Void, Never>?
     private var stt: (any DownloadableSTTEngine)?
-    private var downloadWatchTask: Task<Void, Never>?
+    private var failureWatchTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let store = SettingsStore()
@@ -47,11 +47,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.coordinator = coordinator
         self.hotkey = hotkey
 
-        // Show toast when hotkey is pressed during a download
+        // Show toast when Hold-to-talk hotkey is pressed while the STT engine is not ready
         Task {
-            await coordinator.setHotkeyDuringDownloadHandler {
+            await coordinator.setHotkeyWhileModelNotReadyHandler { reason in
+                let message: String
+                switch reason {
+                case .checking:
+                    message = "speak is checking the model. Try again in a moment."
+                case .downloading(let f):
+                    message = "speak is downloading the model (\(Int(f * 100))%). Try again in a moment."
+                case .failed:
+                    message = "speak's model download failed. Open Settings to retry."
+                }
                 Task { @MainActor in
-                    ToastPresenter.shared.show("speak is downloading the model. Try again in a moment.")
+                    ToastPresenter.shared.show(message)
                 }
             }
         }
@@ -110,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkey?.stop()
         overlay?.stop()
         permissionsRefreshTask?.cancel()
-        downloadWatchTask?.cancel()
+        failureWatchTask?.cancel()
     }
 
     // MARK: - Private
@@ -135,33 +144,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding?.show(startingAt: missing)
     }
 
-    /// Kicks off a model download if the model isn't cached yet, and wires progress to the UI.
+    /// Kicks off a model download if the model isn't cached yet, and wires ModelState to the UI.
     private func startModelDownloadIfNeeded() {
-        guard let stt, let coordinator, let menuBar, let overlay else { return }
+        guard let stt, let menuBar, let overlay else { return }
 
-        // Register all stream subscribers BEFORE starting the download so no events are missed.
-        let menuBarStream = stt.downloadProgressStream()
-        let overlayStream = stt.downloadProgressStream()
-        let watchStream = stt.downloadProgressStream()
+        menuBar.observeModelState(stt.modelStateUpdates())
+        overlay.observeModelState(stt.modelStateUpdates())
 
-        menuBar.observeDownloadProgress(menuBarStream)
-        overlay.observeDownloadProgress(overlayStream)
-
-        downloadWatchTask?.cancel()
-        downloadWatchTask = Task { [weak coordinator] in
-            for await event in watchStream {
-                switch event {
-                case .downloading:
-                    await coordinator?.setDownloading(true)
-                case .completed:
-                    await coordinator?.setDownloading(false)
-                    Diagnostics.log("appdelegate: model download complete")
-                case .failed(let msg):
-                    await coordinator?.setDownloading(false)
+        failureWatchTask?.cancel()
+        failureWatchTask = Task {
+            for await state in stt.modelStateUpdates() {
+                if case .notReady(.failed(let msg)) = state {
                     Diagnostics.log("appdelegate: model download failed: \(msg)")
                     await MainActor.run {
                         ToastPresenter.shared.show("Model download failed. Will use previously cached model if available.")
                     }
+                } else if case .ready = state {
+                    Diagnostics.log("appdelegate: model ready")
                 }
             }
         }
