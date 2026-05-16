@@ -2,7 +2,6 @@ import AppKit
 import Combine
 import ServiceManagement
 import SpeakKit
-import SpeakSTT
 
 /// Bridges SettingsView to SettingsStore, HotkeyMonitor, and SMAppService.
 /// Must be used on the main actor (it drives UI).
@@ -44,13 +43,13 @@ final class SettingsViewModel: ObservableObject {
 
     private let store: SettingsStore
     private let hotkeyMonitor: HotkeyMonitor
-    private let sttEngine: WhisperKitSTTEngine
+    private let sttEngine: any DownloadableSTTEngine
     private let coordinator: CaptureCoordinator
 
     init(
         store: SettingsStore,
         hotkeyMonitor: HotkeyMonitor,
-        sttEngine: WhisperKitSTTEngine,
+        sttEngine: any DownloadableSTTEngine,
         coordinator: CaptureCoordinator
     ) {
         self.store = store

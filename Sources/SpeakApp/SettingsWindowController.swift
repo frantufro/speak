@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import SpeakKit
-import SpeakSTT
 
 /// Opens (or brings to front) the Settings window.
 @MainActor
@@ -11,7 +10,7 @@ final class SettingsWindowController: NSWindowController {
     init(
         store: SettingsStore,
         hotkeyMonitor: HotkeyMonitor,
-        sttEngine: WhisperKitSTTEngine,
+        sttEngine: any DownloadableSTTEngine,
         coordinator: CaptureCoordinator
     ) {
         let vm = SettingsViewModel(
