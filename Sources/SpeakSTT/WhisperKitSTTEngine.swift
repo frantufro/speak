@@ -43,8 +43,8 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
     public func ensureModelDownloaded() async {
         let shouldStart: Bool = stateLock.withLock { state in
             guard state.cachedEngine == nil else { return false }
-            if case .notReady(.downloading) = state.modelState { return false }
-            if case .notReady(.checking) = state.modelState { return false }
+            guard !state.loadInFlight else { return false }
+            state.loadInFlight = true
             state.setModelState(.notReady(.checking))
             return true
         }
@@ -59,6 +59,7 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
             guard newModelName != state.modelName else { return false }
             state.modelName = newModelName
             state.cachedEngine = nil
+            state.loadInFlight = true
             state.setModelState(.notReady(.checking))
             return true
         }
@@ -96,13 +97,10 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
             return existing
         }
         let alreadyInProgress = stateLock.withLock { state -> Bool in
-            switch state.modelState {
-            case .notReady(.downloading), .notReady(.checking):
-                return true
-            default:
-                state.setModelState(.notReady(.checking))
-                return false
-            }
+            if state.loadInFlight { return true }
+            state.loadInFlight = true
+            state.setModelState(.notReady(.checking))
+            return false
         }
         if alreadyInProgress {
             // Wait for the ongoing download by polling.
@@ -137,12 +135,14 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
                 Diagnostics.log("whisperkit: model loaded in \(String(format: "%.2f", elapsed))s")
                 stateLock.withLock { state in
                     state.cachedEngine = engine
+                    state.loadInFlight = false
                     state.setModelState(.ready)
                     state.finishAll()
                 }
             } catch {
                 Diagnostics.log("whisperkit: model load failed: \(error)")
                 stateLock.withLock { state in
+                    state.loadInFlight = false
                     state.setModelState(.notReady(.failed(message: error.localizedDescription)))
                     state.finishAll()
                 }
@@ -173,12 +173,14 @@ public final class WhisperKitSTTEngine: SpeakKit.STTEngine, SpeakKit.Downloadabl
                 Diagnostics.log("whisperkit: model downloaded and loaded in \(String(format: "%.2f", elapsed))s")
                 stateLock.withLock { state in
                     state.cachedEngine = engine
+                    state.loadInFlight = false
                     state.setModelState(.ready)
                     state.finishAll()
                 }
             } catch {
                 Diagnostics.log("whisperkit: download failed: \(error)")
                 stateLock.withLock { state in
+                    state.loadInFlight = false
                     state.setModelState(.notReady(.failed(message: error.localizedDescription)))
                     state.finishAll()
                 }
@@ -224,6 +226,7 @@ private struct State {
     var cachedEngine: WhisperKit? = nil
     var forcedLanguage: String? = nil
     var modelState: SpeakKit.ModelState = .notReady(.checking)
+    var loadInFlight: Bool = false
     var continuations: [AsyncStream<SpeakKit.ModelState>.Continuation] = []
 
     mutating func setModelState(_ new: SpeakKit.ModelState) {

@@ -113,6 +113,41 @@ final class STTContractTests: XCTestCase {
                       "Expected near-empty transcript for silence; got: '\(trimmed)'")
     }
 
+    /// Regression test for a bug where the engine started in `.notReady(.checking)`
+    /// and `ensureModelDownloaded()` used `.checking` itself as the "load in flight"
+    /// sentinel, so the first call short-circuited and the model never loaded.
+    /// Asserts the engine actually progresses past `.checking` once
+    /// `ensureModelDownloaded()` is invoked on a fresh engine.
+    func test_ensureModelDownloaded_progressesPastChecking_onFreshEngine() async throws {
+        try optInOrSkip()
+        let engine = makeEngine()
+
+        // Confirm the initial state is `.checking` so the test is exercising
+        // the exact regression scenario.
+        XCTAssertEqual(engine.modelState, .notReady(.checking))
+
+        Task { await engine.ensureModelDownloaded() }
+
+        var observedNonCheckingNotReady = false
+        var becameReady = false
+        let deadline = Date().addingTimeInterval(120)
+        for await state in engine.modelStateUpdates() {
+            switch state {
+            case .ready:
+                becameReady = true
+            case .notReady(.checking):
+                break
+            case .notReady(.downloading), .notReady(.failed):
+                observedNonCheckingNotReady = true
+            }
+            if becameReady { break }
+            if Date() > deadline { break }
+        }
+
+        XCTAssertTrue(becameReady || observedNonCheckingNotReady,
+                      "Expected ensureModelDownloaded() to drive state past .checking; engine appears stuck.")
+    }
+
     func test_shortUtterance_producesNonEmptyTranscript() async throws {
         try optInOrSkip()
         let url = try fixtureURL(named: "short")
